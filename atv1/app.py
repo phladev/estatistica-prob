@@ -2,7 +2,22 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="CSGO Dashboard", layout="wide")
+st.set_page_config(page_title="Dashboard CSGO", layout="wide")
+
+AGG_FUNCTIONS = {
+    "Media": pd.Series.mean,
+    "Mediana": pd.Series.median,
+    "Desvio padrao": pd.Series.std,
+    "Minimo": pd.Series.min,
+    "Maximo": pd.Series.max,
+}
+
+METRIC_LABELS = {
+    "rating": "Rating",
+    "kd": "KD",
+    "kd_diff": "Diferenca KD",
+    "total_maps": "Total de mapas",
+}
 
 
 @st.cache_data
@@ -10,6 +25,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     players = pd.read_csv("db/player_stats.csv")
     teams = pd.read_csv("db/team_stats.csv")
 
+    # Remove colunas de indice automatico geradas em algumas exportacoes CSV.
     for df in (players, teams):
         unnamed_cols = [c for c in df.columns if c.lower().startswith("unnamed")]
         if unnamed_cols:
@@ -21,8 +37,8 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     players[numeric_cols_players] = players[numeric_cols_players].apply(pd.to_numeric, errors="coerce")
     teams[numeric_cols_teams] = teams[numeric_cols_teams].apply(pd.to_numeric, errors="coerce")
 
-    players["entity_type"] = "Player"
-    teams["entity_type"] = "Team"
+    players["entity_type"] = "Jogador"
+    teams["entity_type"] = "Time"
 
     return players, teams
 
@@ -41,20 +57,12 @@ def agg_value(series: pd.Series, agg_name: str) -> float:
     if series.empty:
         return float("nan")
 
-    if agg_name == "Mean":
-        return series.mean()
-    if agg_name == "Median":
-        return series.median()
-    if agg_name == "Std":
-        return series.std()
-    if agg_name == "Min":
-        return series.min()
-    return series.max()
+    return AGG_FUNCTIONS[agg_name](series)
 
 
 players_df, teams_df = load_data()
 
-st.title("CSGO Stats: Players x Teams")
+st.title("Estatisticas CSGO: Jogadores x Times")
 st.caption("Analise descritiva interativa com filtros, graficos e tabelas.")
 
 all_countries = sorted(set(players_df["country"].dropna().unique()).union(set(teams_df["country"].dropna().unique())))
@@ -63,29 +71,31 @@ max_rating = float(max(players_df["rating"].max(), teams_df["rating"].max()))
 
 with st.sidebar:
     st.header("Filtros")
-    selected_countries = st.multiselect("Country", options=all_countries)
-    min_maps = st.slider("Minimum maps", min_value=0, max_value=int(max(players_df["total_maps"].max(), teams_df["total_maps"].max())), value=100)
-    rating_range = st.slider("Rating range", min_value=round(min_rating, 2), max_value=round(max_rating, 2), value=(round(min_rating, 2), round(max_rating, 2)), step=0.01)
+    selected_countries = st.multiselect("Pais", options=all_countries)
+    min_maps = st.slider("Minimo de mapas", min_value=0, max_value=int(max(players_df["total_maps"].max(), teams_df["total_maps"].max())), value=100)
+    rating_range = st.slider("Faixa de rating", min_value=round(min_rating, 2), max_value=round(max_rating, 2), value=(round(min_rating, 2), round(max_rating, 2)), step=0.01)
     top_n = st.slider("Top N", min_value=5, max_value=40, value=10)
 
     st.markdown("---")
-    st.subheader("Bonus: summary metric")
-    agg_name = st.selectbox("Aggregation", ["Mean", "Median", "Std", "Min", "Max"], index=1)
-    metric_name = st.selectbox("Metric", ["rating", "kd", "kd_diff", "total_maps"], index=0)
+    st.subheader("Bonus: medida-resumo")
+    agg_name = st.selectbox("Agregacao", ["Media", "Mediana", "Desvio padrao", "Minimo", "Maximo"], index=1)
+    metric_name = st.selectbox("Metrica", ["rating", "kd", "kd_diff", "total_maps"], index=0)
 
 players_f = apply_filters(players_df, selected_countries, min_maps, rating_range)
 teams_f = apply_filters(teams_df, selected_countries, min_maps, rating_range)
 
 common_cols = ["name", "country", "total_maps", "kd_diff", "kd", "rating", "entity_type"]
+# Mantem apenas colunas comuns para comparacao direta entre entidades.
 combined = pd.concat([players_f[common_cols], teams_f[common_cols]], ignore_index=True)
+metric_label = METRIC_LABELS[metric_name]
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric(f"Players {agg_name} {metric_name}", f"{agg_value(players_f[metric_name], agg_name):.3f}")
-c2.metric(f"Teams {agg_name} {metric_name}", f"{agg_value(teams_f[metric_name], agg_name):.3f}")
-c3.metric("Filtered players", f"{len(players_f)}")
-c4.metric("Filtered teams", f"{len(teams_f)}")
+c1.metric(f"Jogadores - {agg_name} de {metric_label}", f"{agg_value(players_f[metric_name], agg_name):.3f}")
+c2.metric(f"Times - {agg_name} de {metric_label}", f"{agg_value(teams_f[metric_name], agg_name):.3f}")
+c3.metric("Jogadores filtrados", f"{len(players_f)}")
+c4.metric("Times filtrados", f"{len(teams_f)}")
 
-st.markdown("### Dynamic ranking")
+st.markdown("### Ranking dinamico")
 col_rank_1, col_rank_2 = st.columns(2)
 
 with col_rank_1:
@@ -96,7 +106,7 @@ with col_rank_1:
         y="name",
         orientation="h",
         color="country",
-        title=f"Top {top_n} players by {metric_name}",
+        title=f"Top {top_n} jogadores por {metric_label}",
     )
     fig_players_rank.update_layout(height=440, yaxis_title="")
     st.plotly_chart(fig_players_rank, use_container_width=True)
@@ -109,20 +119,21 @@ with col_rank_2:
         y="name",
         orientation="h",
         color="country",
-        title=f"Top {top_n} teams by {metric_name}",
+        title=f"Top {top_n} times por {metric_label}",
     )
     fig_teams_rank.update_layout(height=440, yaxis_title="")
     st.plotly_chart(fig_teams_rank, use_container_width=True)
 
-st.markdown("### Performance vs volume")
+st.markdown("### Desempenho x volume")
 fig_scatter = px.scatter(
     combined,
     x="total_maps",
     y="rating",
     color="entity_type",
+    # Usa valor absoluto para tamanho da bolha e evita tamanho zero para melhor leitura.
     size=combined["kd_diff"].abs().clip(lower=1),
     hover_data=["name", "country", "kd", "kd_diff"],
-    title="Rating x Total maps (bubble size = |kd_diff|)",
+    title="Rating x Total de mapas (tamanho da bolha = |kd_diff|)",
 )
 fig_scatter.update_layout(height=460)
 st.plotly_chart(fig_scatter, use_container_width=True)
@@ -135,7 +146,7 @@ with col_dist_1:
         y="rating",
         color="entity_type",
         points="outliers",
-        title="Rating distribution by entity type",
+        title="Distribuicao de rating por tipo de entidade",
     )
     fig_box.update_layout(height=420, showlegend=False)
     st.plotly_chart(fig_box, use_container_width=True)
@@ -148,14 +159,15 @@ with col_dist_2:
         barmode="overlay",
         nbins=30,
         opacity=0.7,
-        title="Rating histogram: players vs teams",
+        title="Histograma de rating: jogadores x times",
     )
     fig_hist.update_layout(height=420)
     st.plotly_chart(fig_hist, use_container_width=True)
 
-st.markdown("### Country comparison (median rating)")
-country_source = st.radio("Compare country medians for", ["Players", "Teams"], horizontal=True)
-country_df = players_f if country_source == "Players" else teams_f
+st.markdown("### Comparacao por pais (mediana de rating)")
+country_source = st.radio("Comparar medianas por pais para", ["Jogadores", "Times"], horizontal=True)
+country_df = players_f if country_source == "Jogadores" else teams_f
+# A mediana reduz o impacto de outliers no comparativo por pais.
 country_med = (
     country_df.groupby("country", as_index=False)["rating"]
     .median()
@@ -167,13 +179,13 @@ fig_country = px.bar(
     x="country",
     y="rating",
     color="rating",
-    title=f"Top {top_n} countries by median rating ({country_source})",
+    title=f"Top {top_n} paises por mediana de rating ({country_source})",
 )
 fig_country.update_layout(height=420)
 st.plotly_chart(fig_country, use_container_width=True)
 
-st.markdown("### Dynamic tables")
-tab1, tab2 = st.tabs(["Players table", "Teams table"])
+st.markdown("### Tabelas dinamicas")
+tab1, tab2 = st.tabs(["Tabela de jogadores", "Tabela de times"])
 
 with tab1:
     view_cols_players = ["name", "country", "teams", "total_maps", "total_rounds", "kd_diff", "kd", "rating"]
