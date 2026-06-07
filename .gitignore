@@ -1,1 +1,3 @@
 atv2/.venv/*
+atv3/.venv/*
+atv3/__pycache__/*
